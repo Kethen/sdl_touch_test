@@ -171,8 +171,6 @@ void render_state(SDL_Renderer *renderer, SDL_Window *window, struct pointer_sta
 		float x = 0;
 		float y = 0;
 		if (cur->mouse){
-			cur = cur->next;
-			continue;
 			x = 1280 / 2 * (cur->x / width);
 			y = 800 / 2 * (cur->y / height);
 			sprintf(text_buf, "[] mouse %u %f %f", cur->mouse_id, cur->x, cur->y);
@@ -199,6 +197,7 @@ int main(){
 		ERR("failed initializing sdl\n");
 		exit(1);
 	}
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 
 	SDL_Window *window = NULL;
 	SDL_Renderer *renderer = NULL;
