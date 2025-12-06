@@ -13,10 +13,23 @@
 	fflush(stdout); \
 }
 
+enum mouse_state_update {
+	MOUSE_UPDATE_UNCHANGED,
+	MOUSE_UPDATE_LEFT_DOWN,
+	MOUSE_UPDATE_LEFT_UP,
+	MOUSE_UPDATE_MIDDLE_DOWN,
+	MOUSE_UPDATE_MIDDLE_UP,
+	MOUSE_UPDATE_RIGHT_DOWN,
+	MOUSE_UPDATE_RIGHT_UP
+};
+
 struct debug_line{
 	int written;
 	char debug_text[1024];
 };
+
+#define WIDTH 1280
+#define HEIGHT 800
 
 struct debug_line debug_lines[800 / 12] = {0};
 int cur_line = 0;
@@ -49,6 +62,9 @@ struct pointer_state{
 	float x;
 	float y;
 	float pressure;
+	bool left_down;
+	bool middle_down;
+	bool right_down;
 };
 
 struct pointer_state *search_state(struct pointer_state **list, int mouse, SDL_MouseID mouse_id, SDL_TouchID touch_id, SDL_FingerID finger_id){
@@ -76,19 +92,45 @@ struct pointer_state *search_finger_state(struct pointer_state **list, SDL_Touch
 	return search_state(list, 0, 0, touch_id, finger_id);
 }
 
-void insert_state(struct pointer_state **list, int mouse, SDL_MouseID mouse_id, SDL_TouchID touch_id, SDL_FingerID finger_id, float x, float y, float pressure){
+void insert_state(struct pointer_state **list, int mouse, SDL_MouseID mouse_id, SDL_TouchID touch_id, SDL_FingerID finger_id, float x, float y, float pressure, enum mouse_state_update mouse_update){
+	#define MOUSE_UPDATE() { \
+		switch(mouse_update){ \
+			case MOUSE_UPDATE_LEFT_DOWN: \
+				state->left_down = true; \
+				break; \
+			case MOUSE_UPDATE_LEFT_UP: \
+				state->left_down = false; \
+				break; \
+			case MOUSE_UPDATE_MIDDLE_DOWN: \
+				state->middle_down = true; \
+				break; \
+			case MOUSE_UPDATE_MIDDLE_UP: \
+				state->middle_down = false; \
+				break; \
+			case MOUSE_UPDATE_RIGHT_DOWN: \
+				state->right_down = true; \
+				break; \
+			case MOUSE_UPDATE_RIGHT_UP: \
+				state->right_down = false; \
+				break; \
+		} \
+	}
+
 	if (*list == NULL){
 		struct pointer_state *state = malloc(sizeof(struct pointer_state));
 		if (state == NULL){
 			ERR("out of memory\n");
 			exit(1);
 		}
+		memset(state, 0, sizeof(struct pointer_state));
 		state->mouse = mouse;
 		state->x = x;
 		state->y = y;
+		state->pressure = pressure;
 		state->mouse_id = mouse_id;
 		state->touch_id = touch_id;
 		state->finger_id = finger_id;
+		MOUSE_UPDATE();
 		state->prev = NULL;
 		state->next = NULL;
 		list[0] = state;
@@ -99,6 +141,8 @@ void insert_state(struct pointer_state **list, int mouse, SDL_MouseID mouse_id, 
 	if (state != NULL){
 		state->x = x;
 		state->y = y;
+		state->pressure = pressure;
+		MOUSE_UPDATE();
 		return;
 	}
 
@@ -107,24 +151,27 @@ void insert_state(struct pointer_state **list, int mouse, SDL_MouseID mouse_id, 
 		ERR("out of memory\n");
 		exit(1);
 	}
+	memset(state, 0, sizeof(struct pointer_state));
 	state->mouse = mouse;
 	state->x = x;
 	state->y = y;
+	state->pressure = pressure;
 	state->mouse_id = mouse_id;
 	state->touch_id = touch_id;
 	state->finger_id = finger_id;
+	MOUSE_UPDATE();
 	state->prev = NULL;
 	state->next = *list;
 	list[0]->prev = state;
 	list[0] = state;
 }
 
-void insert_mouse_state(struct pointer_state **list, SDL_MouseID mouse_id, float x, float y){
-	insert_state(list, 1, mouse_id, 0, 0, x, y, 0);
+void insert_mouse_state(struct pointer_state **list, SDL_MouseID mouse_id, float x, float y, enum mouse_state_update mouse_update){
+	insert_state(list, 1, mouse_id, 0, 0, x, y, 0, mouse_update);
 }
 
 void insert_finger_state(struct pointer_state **list, SDL_TouchID touch_id, SDL_FingerID finger_id, float x, float y, float pressure){
-	insert_state(list, 0, 0, touch_id, finger_id, x, y, pressure);
+	insert_state(list, 0, 0, touch_id, finger_id, x, y, pressure, MOUSE_UPDATE_UNCHANGED);
 }
 
 void remove_state(struct pointer_state **list, int mouse, SDL_MouseID mouse_id, SDL_TouchID touch_id, SDL_FingerID finger_id){
@@ -171,12 +218,12 @@ void render_state(SDL_Renderer *renderer, SDL_Window *window, struct pointer_sta
 		float x = 0;
 		float y = 0;
 		if (cur->mouse){
-			x = 1280 / 2 * (cur->x / width);
-			y = 800 / 2 * (cur->y / height);
-			sprintf(text_buf, "[] mouse %u %f %f", cur->mouse_id, cur->x, cur->y);
+			x = WIDTH / 2 * (cur->x / width);
+			y = HEIGHT / 2 * (cur->y / height);
+			sprintf(text_buf, "[] mouse %u %f %f %d %d %d", cur->mouse_id, cur->x, cur->y, cur->left_down, cur->middle_down, cur->right_down);
 		}else{
-			x = 1280 / 2 * cur->x;
-			y = 800 / 2 * cur->y;
+			x = WIDTH / 2 * cur->x;
+			y = HEIGHT / 2 * cur->y;
 			sprintf(text_buf, "[] finger %u %u %f %f %f", cur->touch_id, cur->finger_id, cur->x, cur->y, cur->pressure);
 		}
 		SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
@@ -201,18 +248,20 @@ int main(){
 
 	SDL_Window *window = NULL;
 	SDL_Renderer *renderer = NULL;
-	int created = SDL_CreateWindowAndRenderer("input_test", 1280, 800, SDL_WINDOW_FULLSCREEN, &window, &renderer);
+	int created = SDL_CreateWindowAndRenderer("input_test", WIDTH, HEIGHT, SDL_WINDOW_FULLSCREEN, &window, &renderer);
 	if (!created){
 		ERR("failed creating window and renderer\n");
 		exit(1);
 	}
 	OUT("window created\n");
 
-	SDL_SetRenderLogicalPresentation(renderer, 1280, 800, SDL_LOGICAL_PRESENTATION_STRETCH);
+	SDL_SetRenderLogicalPresentation(renderer, WIDTH, HEIGHT, SDL_LOGICAL_PRESENTATION_STRETCH);
 	SDL_SetRenderVSync(renderer, 1);
 	OUT("renderer ready\n");
 
 	struct pointer_state *pointer_states = NULL;
+
+	SDL_SetWindowMouseGrab(window, true);
 
 	while(1){
 		int updated = 0;
@@ -242,32 +291,52 @@ int main(){
 					break;
 				case SDL_EVENT_MOUSE_BUTTON_DOWN:{
 					SDL_MouseButtonEvent *mouse_event = (void *)&event;
-					write_debug_line("mouse down event %u %f %f\n", mouse_event->which, mouse_event->x, mouse_event->y);
-					ERR("mouse down %u\n", mouse_event->which);
-					insert_mouse_state(&pointer_states, mouse_event->which, mouse_event->x, mouse_event->y);
+					enum mouse_state_update mouse_update = MOUSE_UPDATE_UNCHANGED;
+					switch(mouse_event->button){
+						case 1:
+							mouse_update = MOUSE_UPDATE_LEFT_DOWN;
+							break;
+						case 2:
+							mouse_update = MOUSE_UPDATE_MIDDLE_DOWN;
+							break;
+						case 3:
+							mouse_update = MOUSE_UPDATE_RIGHT_DOWN;
+							break;
+					}
+					write_debug_line("mouse down event %u %f %f %d\n", mouse_event->which, mouse_event->x, mouse_event->y, mouse_event->button);
+					ERR("mouse down %u %d\n", mouse_event->which, mouse_event->button);
+					insert_mouse_state(&pointer_states, mouse_event->which, mouse_event->x, mouse_event->y, mouse_update);
+					break;
+				}
+				case SDL_EVENT_MOUSE_MOTION:{
+					SDL_MouseMotionEvent *mouse_event = (void *)&event;
+					insert_mouse_state(&pointer_states, mouse_event->which, mouse_event->x, mouse_event->y, MOUSE_UPDATE_UNCHANGED);
+					write_debug_line("mouse motion event %u %f %f\n", mouse_event->which, mouse_event->x, mouse_event->y);
 					break;
 				}
 				case SDL_EVENT_MOUSE_BUTTON_UP:{
 					SDL_MouseButtonEvent *mouse_event = (void *)&event;
+					enum mouse_state_update mouse_update = MOUSE_UPDATE_UNCHANGED;
+					switch(mouse_event->button){
+						case 1:
+							mouse_update = MOUSE_UPDATE_LEFT_UP;
+							break;
+						case 2:
+							mouse_update = MOUSE_UPDATE_MIDDLE_UP;
+							break;
+						case 3:
+							mouse_update = MOUSE_UPDATE_RIGHT_UP;
+							break;
+					}
 					write_debug_line("mouse up event %u %f %f\n", mouse_event->which, mouse_event->x, mouse_event->y);
 					ERR("mouse up %u\n", mouse_event->which);
-					remove_mouse_state(&pointer_states, mouse_event->which);
+					insert_mouse_state(&pointer_states, mouse_event->which, mouse_event->x, mouse_event->y, mouse_update);
 					break;
 				}
 				case SDL_EVENT_MOUSE_REMOVED:{
 					SDL_MouseDeviceEvent *mouse_event = (void *)&event;
 					ERR("mouse removed %u\n", mouse_event->which);
 					remove_mouse_state(&pointer_states, mouse_event->which);
-					break;
-				}
-				case SDL_EVENT_MOUSE_MOTION:{
-					SDL_MouseMotionEvent *mouse_event = (void *)&event;
-					struct pointer_state *mouse_state = search_mouse_state(&pointer_states, mouse_event->which);
-					if (mouse_state != NULL){
-						write_debug_line("mouse motion event %u %f %f\n", mouse_event->which, mouse_event->x, mouse_event->y);
-						mouse_state->x = mouse_event->x;
-						mouse_state->y = mouse_event->y;
-					}
 					break;
 				}
 				case SDL_EVENT_FINGER_DOWN:{
