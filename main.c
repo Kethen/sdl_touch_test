@@ -362,12 +362,7 @@ int main(){
 				case SDL_EVENT_FINGER_MOTION:{
 					SDL_TouchFingerEvent *finger_event = (void *)&event;
 					write_debug_line("finger motion event %u %u %f %f %f\n", finger_event->touchID, finger_event->fingerID, finger_event->x, finger_event->y, finger_event->pressure);
-					struct pointer_state *finger_state = search_finger_state(&pointer_states, finger_event->touchID, finger_event->fingerID);
-					if (finger_state != NULL){
-						finger_state->x = finger_event->x;
-						finger_state->y = finger_event->y;
-						finger_state->pressure = finger_event->pressure;
-					}
+					insert_finger_state(&pointer_states, finger_event->touchID, finger_event->fingerID, finger_event->x, finger_event->y, finger_event->pressure);
 					break;
 				}
 			}
